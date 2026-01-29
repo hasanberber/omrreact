@@ -189,64 +189,55 @@ const CombinedOMRApp = () => {
     addResult('📄 PDF oluşturuluyor...', 'info');
     
     try {
-      // Canvas element'ini al
-      const canvas = document.createElement('canvas');
-      canvas.width = A4_WIDTH_PX;
-      canvas.height = A4_HEIGHT_PX;
-      const ctx = canvas.getContext('2d');
+      // html2canvas kullanarak element'i capture et
+      const container = previewContainerRef.current;
+      if (!container) return;
       
-      // Arka planı beyaz yap
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, A4_WIDTH_PX, A4_HEIGHT_PX);
+      const canvas = await html2canvas(container.querySelector('img') || container, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#FFFFFF'
+      });
       
-      // Resmi yükle
-      const img = new Image();
-      img.onload = () => {
-        // Resmi canvas'a çiz
-        ctx.drawImage(img, 0, 0, A4_WIDTH_PX, A4_HEIGHT_PX);
-        
-        // PDF oluştur
-        const pdf = new jsPDF({
-          orientation: 'portrait',
-          unit: 'mm',
-          format: 'a4'
-        });
-        
-        // Canvas'tan data URL al
-        const imgData = canvas.toDataURL('image/png');
-        
-        // PDF boyutları
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
-        
-        // Görsel boyutlarını hesapla
-        const imgWidth = canvas.width;
-        const imgHeight = canvas.height;
-        const ratio = imgWidth / imgHeight;
-        
-        // PDF'e sığdır
-        let finalWidth = pdfWidth;
-        let finalHeight = pdfWidth / ratio;
-        
-        if (finalHeight > pdfHeight) {
-          finalHeight = pdfHeight;
-          finalWidth = pdfHeight * ratio;
-        }
-        
-        // Ortala
-        const x = (pdfWidth - finalWidth) / 2;
-        const y = (pdfHeight - finalHeight) / 2;
-        
-        // PDF'e ekle
-        pdf.addImage(imgData, 'PNG', x, y, finalWidth, finalHeight);
-        
-        // İndir
-        pdf.save(`omr-form-${formSettings.title.replace(/\s+/g, '-').toLowerCase()}.pdf`);
-        
-        addResult('✓ PDF başarıyla indirildi.', 'success');
-      };
+      // PDF oluştur
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
       
-      img.src = previewImage;
+      // Canvas'tan data URL al
+      const imgData = canvas.toDataURL('image/png');
+      
+      // PDF boyutları
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      
+      // Görsel boyutlarını hesapla
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = imgWidth / imgHeight;
+      
+      // PDF'e sığdır
+      let finalWidth = pdfWidth;
+      let finalHeight = pdfWidth / ratio;
+      
+      if (finalHeight > pdfHeight) {
+        finalHeight = pdfHeight;
+        finalWidth = pdfHeight * ratio;
+      }
+      
+      // Ortala
+      const x = (pdfWidth - finalWidth) / 2;
+      const y = (pdfHeight - finalHeight) / 2;
+      
+      // PDF'e ekle
+      pdf.addImage(imgData, 'PNG', x, y, finalWidth, finalHeight);
+      
+      // İndir
+      pdf.save(`omr-form-${formSettings.title.replace(/\s+/g, '-').toLowerCase()}.pdf`);
+      
+      addResult('✓ PDF başarıyla indirildi.', 'success');
       
     } catch (error) {
       console.error('PDF oluşturma hatası:', error);
@@ -1800,6 +1791,59 @@ const CombinedOMRApp = () => {
     );
   };
 
+  // Kamera kontrolleri için yeni butonlar
+  const CameraControls = () => (
+    <div className="flex gap-2 mt-4">
+      <button
+        onClick={() => {
+          const newValue = !showAlignmentGrid;
+          setShowAlignmentGrid(newValue);
+          addResult(newValue ? '✓ Hizalama kılavuzu açıldı' : '✓ Hizalama kılavuzu kapatıldı', 'success');
+        }}
+        className="px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2"
+      >
+        <Grid3x3 size={16} />
+        {showAlignmentGrid ? 'Kılavuz Kapat' : 'Kılavuz Aç'}
+      </button>
+      
+      <button
+        onClick={() => {
+          if (cameraStream) {
+            const track = cameraStream.getVideoTracks()[0];
+            const constraints = track.getConstraints();
+            
+            if (constraints.facingMode === 'environment') {
+              track.applyConstraints({ facingMode: 'user' });
+              addResult('📷 Ön kamera kullanılıyor', 'info');
+            } else {
+              track.applyConstraints({ facingMode: 'environment' });
+              addResult('📷 Arka kamera kullanılıyor', 'info');
+            }
+          }
+        }}
+        className="px-3 py-2 bg-blue-200 hover:bg-blue-300 text-blue-700 rounded-lg flex items-center gap-2"
+      >
+        <RotateCw size={16} />
+        Kamera Değiştir
+      </button>
+      
+      <button
+        onClick={() => {
+          if (videoRef.current) {
+            const video = videoRef.current;
+            const currentScale = video.style.transform.includes('scaleX(-1)') ? '' : 'scaleX(-1)';
+            video.style.transform = currentScale;
+            addResult(currentScale ? '✓ Ayna görünümü açıldı' : '✓ Ayna görünümü kapatıldı', 'success');
+          }
+        }}
+        className="px-3 py-2 bg-purple-200 hover:bg-purple-300 text-purple-700 rounded-lg flex items-center gap-2"
+      >
+        <Upload size={16} style={{ transform: 'rotate(90deg)' }} />
+        Ayna Görünümü
+      </button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-7xl mx-auto">
@@ -1809,30 +1853,33 @@ const CombinedOMRApp = () => {
               <FileText size={36} />
               OMR Sistemi - Form Üretici & Okuyucu
             </h1>
-            <p className="text-purple-100 mt-2">Kapsamlı OMR Form Oluşturma ve Okuma Sistemi</p>
+            <p className="text-purple-100 mt-2 flex items-center gap-2">
+              <Edit size={16} />
+              Kapsamlı OMR Form Oluşturma ve Okuma Sistemi
+            </p>
           </div>
 
           <div className="flex border-b">
             <button
               onClick={() => setAppMode('generator')}
-              className={`flex-1 px-6 py-4 font-bold text-lg transition-all ${
+              className={`flex-1 px-6 py-4 font-bold text-lg transition-all flex items-center justify-center gap-2 ${
                 appMode === 'generator'
                   ? 'bg-white text-purple-600 border-b-2 border-purple-600'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              <Settings className="inline mr-2" size={20} />
+              <Settings size={20} />
               Form Üretici
             </button>
             <button
               onClick={() => setAppMode('reader')}
-              className={`flex-1 px-6 py-4 font-bold text-lg transition-all ${
+              className={`flex-1 px-6 py-4 font-bold text-lg transition-all flex items-center justify-center gap-2 ${
                 appMode === 'reader'
                   ? 'bg-white text-blue-600 border-b-2 border-blue-600'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              <FileText className="inline mr-2" size={20} />
+              <FileText size={20} />
               Form Okuyucu
             </button>
           </div>
@@ -2036,6 +2083,7 @@ const CombinedOMRApp = () => {
                           })}
                           className="w-full bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-2 px-4 rounded-lg transition-all"
                         >
+                          <RotateCw className="inline mr-2" size={16} />
                           Varsayılana Sıfırla
                         </button>
                       </div>
@@ -2173,7 +2221,7 @@ const CombinedOMRApp = () => {
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Öğrenci No Satır Aralığı (px)
-                        </label>
+                          </label>
                           <input
                             type="number"
                             min="15"
@@ -2262,14 +2310,14 @@ const CombinedOMRApp = () => {
                               disabled={formSettings.bubbleSize >= 40}
                               className="px-2 py-1 bg-gray-200 hover:bg-gray-300 rounded-t text-sm disabled:opacity-50"
                             >
-                              ▲
+                              <Plus size={12} />
                             </button>
                             <button 
                               onClick={() => handleSettingChange('bubbleSize', Math.max(8, formSettings.bubbleSize - 1))}
                               disabled={formSettings.bubbleSize <= 8}
                               className="px-2 py-1 bg-gray-200 hover:bg-gray-300 rounded-b text-sm disabled:opacity-50"
                             >
-                              ▼
+                              <Minus size={12} />
                             </button>
                           </div>
                           <span className="ml-2 text-sm text-gray-500">
@@ -2395,16 +2443,16 @@ const CombinedOMRApp = () => {
                       <div className="mt-3 flex gap-2">
                         <button
                           onClick={autoFillAnswerKey}
-                          className="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-sm font-medium py-1 px-3 rounded-lg transition-all"
+                          className="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-sm font-medium py-1 px-3 rounded-lg transition-all flex items-center justify-center gap-1"
                         >
-                          <Copy size={14} className="inline mr-1" />
+                          <Copy size={14} />
                           Otomatik Doldur
                         </button>
                         <button
                           onClick={clearAnswerKey}
-                          className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium py-1 px-3 rounded-lg transition-all"
+                          className="flex-1 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-medium py-1 px-3 rounded-lg transition-all flex items-center justify-center gap-1"
                         >
-                          <Trash2 size={14} className="inline mr-1" />
+                          <Trash2 size={14} />
                           Temizle
                         </button>
                       </div>
@@ -2567,11 +2615,11 @@ const CombinedOMRApp = () => {
                         </button>
                         
                         <button
-                          onClick={downloadJson}
+                          onClick={downloadAll}
                           className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-all flex items-center justify-center gap-2"
                         >
-                          <FileText size={20} />
-                          JSON İndir
+                          <Download size={20} />
+                          Tümünü İndir
                         </button>
                       </div>
                       
@@ -2581,7 +2629,7 @@ const CombinedOMRApp = () => {
                           <li><strong>Formları Kaydet:</strong> Form ayarlarını, cevap anahtarını ve öğrenci bilgilerini JSON olarak kaydeder</li>
                           <li><strong>PNG İndir:</strong> Formun görselini PNG formatında indirir</li>
                           <li><strong>PDF İndir:</strong> Formu yüksek kalitede PDF olarak indirir</li>
-                          <li><strong>JSON İndir:</strong> OMR okuma şablonunu JSON formatında indirir</li>
+                          <li><strong>Tümünü İndir:</strong> PNG ve JSON dosyalarını birlikte indirir</li>
                         </ul>
                       </div>
                     </div>
@@ -2598,7 +2646,7 @@ const CombinedOMRApp = () => {
                         file={studentForm}
                         onFileSelect={(file) => handleFileSelect(file, 'student')}
                         inputRef={studentFormRef}
-                        icon={<ImageIcon size={20} />}
+                        icon={<Upload size={20} />}
                         color="green"
                       />
                       
@@ -2607,7 +2655,7 @@ const CombinedOMRApp = () => {
                         file={jsonTemplate}
                         onFileSelect={(file) => handleFileSelect(file, 'json')}
                         inputRef={jsonTemplateRef}
-                        icon={<FileText size={20} />}
+                        icon={<BookOpen size={20} />}
                         color="blue"
                       />
                       
@@ -2834,7 +2882,15 @@ const CombinedOMRApp = () => {
                     <TabButton
                       active={activeTab === 'camera'}
                       onClick={() => setActiveTab('camera')}
-                      label="Kamera"
+                      label={
+                        <div className="flex items-center gap-1">
+                          <Camera size={16} />
+                          Kamera
+                          {isCameraActive && (
+                            <Circle className="text-red-500" size={8} fill="currentColor" />
+                          )}
+                        </div>
+                      }
                     />
                   </div>
                 </div>
@@ -2960,6 +3016,8 @@ const CombinedOMRApp = () => {
                             </div>
                           </div>
                           
+                          <CameraControls />
+                          
                           <div className="mt-4 text-center text-sm text-gray-600">
                             <p className="mb-2">
                               📱 <strong>Formu kameranın önüne yerleştirin</strong>
@@ -3000,7 +3058,10 @@ const CombinedOMRApp = () => {
                         İşleniyor...
                       </>
                     ) : (
-                      'OMR Formunu İşle'
+                      <>
+                        <Scan size={20} />
+                        OMR Formunu İşle
+                      </>
                     )}
                   </button>
                   
@@ -3058,6 +3119,7 @@ const CombinedOMRApp = () => {
             <span className="ml-2">• Tüm ayarlar otomatik kaydedilir</span>
             <span className="ml-2">• OCR'dan gelen sınıf bilgisi düzenleme modunda otomatik yüklenir</span>
             <span className="ml-2">• <strong>Kamera izin mesajı eklendi: İzin reddedildiğinde kullanıcıyı bilgilendirir</strong></span>
+            <span className="ml-2">• <strong>Kamera kontrolleri eklendi: Kamera değiştir, ayna görünümü, kılavuz aç/kapat</strong></span>
           </p>
         </div>
       </div>
