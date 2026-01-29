@@ -4,8 +4,8 @@ import Tesseract from 'tesseract.js';
 import { 
   Upload, FileText, Image as ImageIcon, CheckCircle, XCircle, 
   AlertCircle, Edit, Eye, Download, Copy, Trash2,
-  Camera, Scan, QrCode, Webcam, Grid3x3, Pencil, Loader2, Printer,
-  RotateCw, User, BookOpen, Circle, MousePointer
+  Camera, Scan, QrCode, Webcam, Pencil, Loader2, Printer,
+  RotateCw, User, BookOpen, Circle, MousePointer, Grid
 } from 'lucide-react';
 
 const OMRFormReader = () => {
@@ -873,7 +873,7 @@ const OMRFormReader = () => {
         }}
         className="px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg flex items-center gap-2"
       >
-        <Grid3x3 size={16} />
+        <Grid size={16} />
         {showAlignmentGrid ? 'Kılavuz Kapat' : 'Kılavuz Aç'}
       </button>
       
