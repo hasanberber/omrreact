@@ -5,7 +5,7 @@ import {
   Upload, FileText, Image as ImageIcon, CheckCircle, XCircle, 
   AlertCircle, Edit, Settings, Eye, Key, Download, Copy, 
   Trash2, Plus, Minus, Save, User, Users, BookOpen, Circle, 
-  MousePointer, Camera, Scan, QrCode, Webcam, Grid3x3Icon, Pencil,
+  MousePointer, Camera, Scan, QrCode, Webcam, Grid3x3, Pencil,
   Loader2, Printer, RotateCw
 } from 'lucide-react';
 
