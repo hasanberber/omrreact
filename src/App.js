@@ -2,10 +2,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Tesseract from 'tesseract.js';
 import { 
-  Upload, FileText, Image as ImageIcon, CheckCircle, XCircle, 
-  AlertCircle, Edit, Eye, Download, Copy, Trash2,
-  Camera, Scan, QrCode, Webcam, Pencil, Loader2, Printer,
-  RotateCw, User, BookOpen, Circle, MousePointer, Grid
+  Upload, FileText, CheckCircle, XCircle, 
+  AlertCircle, Eye, Camera, Scan, Grid, Pencil, Loader2,
+  RotateCw, User, BookOpen, Circle
 } from 'lucide-react';
 
 const OMRFormReader = () => {
@@ -22,20 +21,11 @@ const OMRFormReader = () => {
   // Kamera Özellikleri
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
-  const [cameraImage, setCameraImage] = useState(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [scanResult, setScanResult] = useState(null);
   const [alignmentStatus, setAlignmentStatus] = useState('waiting');
   const [cameraFrameColor, setCameraFrameColor] = useState('border-gray-400');
   const [showAlignmentGrid, setShowAlignmentGrid] = useState(true);
   const [detectedCorners, setDetectedCorners] = useState([]);
-
-  // OCR okuma durumu için state
-  const [ocrData, setOcrData] = useState({
-    name: "",
-    surname: "",
-    className: ""
-  });
 
   // Düzenleme modu için state
   const [editMode, setEditMode] = useState(false);
@@ -160,7 +150,6 @@ const OMRFormReader = () => {
       setCameraStream(null);
     }
     setIsCameraActive(false);
-    setCameraImage(null);
     setIsScanning(false);
     setAlignmentStatus('waiting');
     setCameraFrameColor('border-gray-400');
@@ -184,7 +173,6 @@ const OMRFormReader = () => {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
     const imageData = canvas.toDataURL('image/png');
-    setCameraImage(imageData);
     
     const imageFile = {
       name: 'kamera-goruntusu.png',
@@ -254,7 +242,6 @@ const OMRFormReader = () => {
 
   const detectCircles = (pixels, width, height) => {
     const circles = [];
-    const threshold = 100;
     const minDistance = 50;
     
     for (let y = 0; y < height; y += 10) {
@@ -747,8 +734,6 @@ const OMRFormReader = () => {
             stats
           });
           
-          setOcrData(processedOCR);
-          
           addResult('\n🎉 İŞLEM TAMAMLANDI.', 'header');
           setIsProcessing(false);
         });
@@ -767,8 +752,6 @@ const OMRFormReader = () => {
           correctAnswers: finalAnswerKey,
           stats
         });
-        
-        setOcrData(processedOCR);
         
         addResult('\n🎉 İŞLEM TAMAMLANDI.', 'header');
         setIsProcessing(false);
@@ -793,8 +776,6 @@ const OMRFormReader = () => {
           correctAnswers: finalAnswerKey,
           stats
         });
-        
-        setOcrData(processedOCR);
         
         addResult('\n🎉 İŞLEM TAMAMLANDI.', 'header');
         setIsProcessing(false);
