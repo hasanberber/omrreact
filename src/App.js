@@ -4,7 +4,8 @@ import Tesseract from 'tesseract.js';
 import { 
   Upload, FileText, CheckCircle, XCircle, 
   AlertCircle, Eye, Camera, Scan, Grid, Pencil, Loader2,
-  RotateCw, User, BookOpen, Circle
+  RotateCw, User, BookOpen, Circle, Target, Maximize2, Download,
+  Save, Trash2, ZoomIn, ZoomOut, CheckSquare, Square
 } from 'lucide-react';
 
 const OMRFormReader = () => {
@@ -12,7 +13,7 @@ const OMRFormReader = () => {
   const [studentForm, setStudentForm] = useState(null);
   const [jsonTemplate, setJsonTemplate] = useState(null);
   const [answerKeyForm, setAnswerKeyForm] = useState(null);
-  const [activeTab, setActiveTab] = useState('student');
+  const [activeTab, setActiveTab] = useState('camera'); // Kamerayı varsayılan yap
   const [results, setResults] = useState([]);
   const [processedData, setProcessedData] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -26,6 +27,11 @@ const OMRFormReader = () => {
   const [cameraFrameColor, setCameraFrameColor] = useState('border-gray-400');
   const [showAlignmentGrid, setShowAlignmentGrid] = useState(true);
   const [detectedCorners, setDetectedCorners] = useState([]);
+  const [isAutoCaptureMode, setIsAutoCaptureMode] = useState(true);
+  const [showFormPlacementGuide, setShowFormPlacementGuide] = useState(true);
+  const [capturedImage, setCapturedImage] = useState(null);
+  const [cameraZoom, setCameraZoom] = useState(1);
+  const [mirrorMode, setMirrorMode] = useState(false);
 
   // Düzenleme modu için state
   const [editMode, setEditMode] = useState(false);
@@ -49,8 +55,20 @@ const OMRFormReader = () => {
   const cameraCanvasRef = useRef(null);
   const scanIntervalRef = useRef(null);
 
-  // Bileşen unmount olduğunda kamerayı kapat
+  // Sayfa yüklendiğinde otomatik kamera aç
   useEffect(() => {
+    const initCamera = async () => {
+      try {
+        await startCamera();
+      } catch (error) {
+        console.log('Kamera otomatik açılamadı:', error.message);
+        addResult('📷 Kamera otomatik açılamadı. Lütfen formları dosya olarak yükleyin.', 'warning');
+      }
+    };
+
+    initCamera();
+
+    // Cleanup
     return () => {
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -59,7 +77,7 @@ const OMRFormReader = () => {
         clearInterval(scanIntervalRef.current);
       }
     };
-  }, [cameraStream]);
+  }, []);
 
   // KAMERA FONKSİYONLARI
   const startCamera = async () => {
@@ -67,8 +85,8 @@ const OMRFormReader = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
         } 
       });
       
@@ -83,6 +101,7 @@ const OMRFormReader = () => {
       if (videoRef.current) {
         videoRef.current.onloadedmetadata = () => {
           startScanning();
+          addResult('📷 Kamera başarıyla açıldı! Formu kameranın önüne yerleştirin.', 'success');
         };
       }
       
@@ -141,6 +160,7 @@ const OMRFormReader = () => {
       }
       
       addResult(`❌ ${errorMessage} ${errorDetails ? `(${errorDetails})` : ''}`, 'error');
+      throw error;
     }
   };
 
@@ -173,22 +193,18 @@ const OMRFormReader = () => {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
     const imageData = canvas.toDataURL('image/png');
+    setCapturedImage(imageData);
     
     const imageFile = {
-      name: 'kamera-goruntusu.png',
+      name: `form-${new Date().getTime()}.png`,
       data: imageData,
       type: 'image/png'
     };
     
     setStudentForm(imageFile);
-    setActiveTab('student');
-    addResult('📸 Kamera görüntüsü yakalandı ve öğrenci formu olarak ayarlandı.', 'success');
+    addResult('📸 Form görüntüsü yakalandı!', 'success');
     
-    setTimeout(() => {
-      if (jsonTemplate) {
-        simulateOMRProcessingReader();
-      }
-    }, 500);
+    return imageFile;
   };
 
   const startScanning = () => {
@@ -200,11 +216,11 @@ const OMRFormReader = () => {
     
     scanIntervalRef.current = setInterval(() => {
       detectAlignmentCircles();
-    }, 500);
+    }, 300);
   };
 
   const detectAlignmentCircles = () => {
-    if (!videoRef.current || !cameraCanvasRef.current) return;
+    if (!videoRef.current || !cameraCanvasRef.current || !isScanning) return;
     
     try {
       const video = videoRef.current;
@@ -225,9 +241,11 @@ const OMRFormReader = () => {
         setAlignmentStatus('aligned');
         setCameraFrameColor('border-green-500');
         
-        setTimeout(() => {
-          captureAndProcess();
-        }, 1000);
+        if (isAutoCaptureMode) {
+          setTimeout(() => {
+            captureAndProcess();
+          }, 800);
+        }
       } else if (detected.length >= 2) {
         setAlignmentStatus('partial');
         setCameraFrameColor('border-blue-500');
@@ -244,14 +262,15 @@ const OMRFormReader = () => {
     const circles = [];
     const minDistance = 50;
     
-    for (let y = 0; y < height; y += 10) {
-      for (let x = 0; x < width; x += 10) {
+    for (let y = 0; y < height; y += 8) {
+      for (let x = 0; x < width; x += 8) {
         const idx = (y * width + x) * 4;
         const r = pixels[idx];
         const g = pixels[idx + 1];
         const b = pixels[idx + 2];
         
-        if (r < 50 && g < 100 && b > 150) {
+        // Mavi renk tespiti (OMR form köşe işaretleri)
+        if (r < 100 && g < 150 && b > 150 && b > r * 1.5 && b > g * 1.2) {
           let tooClose = false;
           for (const circle of circles) {
             const distance = Math.sqrt(Math.pow(x - circle.x, 2) + Math.pow(y - circle.y, 2));
@@ -276,9 +295,10 @@ const OMRFormReader = () => {
   };
 
   const captureAndProcess = () => {
-    if (!isScanning) return;
+    if (!isScanning || !jsonTemplate) return;
     
-    captureImage();
+    const imageFile = captureImage();
+    if (!imageFile) return;
     
     setIsScanning(false);
     if (scanIntervalRef.current) {
@@ -286,7 +306,28 @@ const OMRFormReader = () => {
       scanIntervalRef.current = null;
     }
     
-    stopCamera();
+    setTimeout(() => {
+      simulateOMRProcessingReader();
+    }, 1000);
+  };
+
+  const manualCaptureAndProcess = () => {
+    if (!isCameraActive) {
+      addResult('❌ Lütfen önce kamerayı açın!', 'error');
+      return;
+    }
+    
+    if (!jsonTemplate) {
+      addResult('❌ Lütfen önce JSON şablonu yükleyin!', 'error');
+      return;
+    }
+    
+    const imageFile = captureImage();
+    if (!imageFile) return;
+    
+    setTimeout(() => {
+      simulateOMRProcessingReader();
+    }, 500);
   };
 
   // GERÇEK OCR FONKSİYONLARI
@@ -463,7 +504,7 @@ const OMRFormReader = () => {
           break;
         case 'json':
           setJsonTemplate(data);
-          setActiveTab('json');
+          setActiveTab('camera');
           try {
             const jsonData = JSON.parse(e.target.result);
             data.parsed = jsonData;
@@ -476,8 +517,15 @@ const OMRFormReader = () => {
                 addResult(`⚠️ JSON'da ${questionCount} soru var ama sadece ${Object.keys(jsonData.answer_key).length} soru için cevap anahtarı tanımlı!`, 'warning');
               }
             }
+            
+            const questionCount = jsonData.template_info?.question_count || Object.keys(jsonData.answer_key || {}).length;
+            addResult(`✓ JSON şablonu yüklendi: ${jsonData.template_info?.title || 'Bilinmeyen Form'}, ${questionCount || 'Bilinmeyen'} soru`, 'success');
+            
+            if (!isCameraActive) {
+              startCamera();
+            }
           } catch (err) {
-            addResult(`JSON formatı hatalı: ${err.message}`, 'error');
+            addResult(`❌ JSON formatı hatalı: ${err.message}`, 'error');
           }
           break;
         case 'answerKey':
@@ -626,12 +674,12 @@ const OMRFormReader = () => {
 
   const simulateOMRProcessingReader = async () => {
     if (!studentForm || !jsonTemplate) {
-      addResult('Lütfen Öğrenci Formu ve JSON Şablonu seçin', 'error');
+      addResult('❌ Lütfen Öğrenci Formu ve JSON Şablonu seçin', 'error');
       return;
     }
 
     if (!jsonTemplate.parsed) {
-      addResult('JSON şablonu geçersiz veya okunamadı', 'error');
+      addResult('❌ JSON şablonu geçersiz veya okunamadı', 'error');
       return;
     }
 
@@ -639,7 +687,7 @@ const OMRFormReader = () => {
     setResults([]);
     addResult('📄 OMR İşlemi Başlatılıyor...', 'header');
     addResult(`📄 Öğrenci Formu: ${studentForm.name}`, 'info');
-    addResult(`📄 Şablon: ${jsonTemplate.name}`, 'info');
+    addResult(`📄 Şablon: ${jsonTemplate.parsed.template_info?.title || 'Bilinmeyen Form'}`, 'info');
     
     if (answerKeyForm && !useSameFormForAnswerKey) {
       addResult(`🔑 Cevap Anahtarı Formu: ${answerKeyForm.name}`, 'info');
@@ -845,7 +893,7 @@ const OMRFormReader = () => {
   );
 
   const CameraControls = () => (
-    <div className="flex gap-2 mt-4">
+    <div className="flex flex-wrap gap-2 mt-4">
       <button
         onClick={() => {
           const newValue = !showAlignmentGrid;
@@ -856,6 +904,30 @@ const OMRFormReader = () => {
       >
         <Grid size={16} />
         {showAlignmentGrid ? 'Kılavuz Kapat' : 'Kılavuz Aç'}
+      </button>
+      
+      <button
+        onClick={() => {
+          const newValue = !showFormPlacementGuide;
+          setShowFormPlacementGuide(newValue);
+          addResult(newValue ? '✓ Form yerleştirme kılavuzu açıldı' : '✓ Form yerleştirme kılavuzu kapatıldı', 'success');
+        }}
+        className="px-3 py-2 bg-blue-200 hover:bg-blue-300 text-blue-700 rounded-lg flex items-center gap-2"
+      >
+        <Target size={16} />
+        {showFormPlacementGuide ? 'Kılavuz Kapat' : 'Kılavuz Aç'}
+      </button>
+      
+      <button
+        onClick={() => {
+          const newValue = !isAutoCaptureMode;
+          setIsAutoCaptureMode(newValue);
+          addResult(newValue ? '✓ Otomatik yakalama açıldı' : '✓ Otomatik yakalama kapatıldı', 'success');
+        }}
+        className={`px-3 py-2 ${isAutoCaptureMode ? 'bg-green-200 hover:bg-green-300' : 'bg-gray-200 hover:bg-gray-300'} ${isAutoCaptureMode ? 'text-green-700' : 'text-gray-700'} rounded-lg flex items-center gap-2`}
+      >
+        <Maximize2 size={16} />
+        {isAutoCaptureMode ? 'Otomatik Açık' : 'Otomatik Kapalı'}
       </button>
       
       <button
@@ -873,7 +945,7 @@ const OMRFormReader = () => {
             }
           }
         }}
-        className="px-3 py-2 bg-blue-200 hover:bg-blue-300 text-blue-700 rounded-lg flex items-center gap-2"
+        className="px-3 py-2 bg-purple-200 hover:bg-purple-300 text-purple-700 rounded-lg flex items-center gap-2"
       >
         <RotateCw size={16} />
         Kamera Değiştir
@@ -881,48 +953,56 @@ const OMRFormReader = () => {
       
       <button
         onClick={() => {
+          setMirrorMode(!mirrorMode);
           if (videoRef.current) {
-            const video = videoRef.current;
-            const currentScale = video.style.transform.includes('scaleX(-1)') ? '' : 'scaleX(-1)';
-            video.style.transform = currentScale;
-            addResult(currentScale ? '✓ Ayna görünümü açıldı' : '✓ Ayna görünümü kapatıldı', 'success');
+            videoRef.current.style.transform = mirrorMode ? '' : 'scaleX(-1)';
           }
+          addResult(mirrorMode ? '✓ Ayna görünümü kapandı' : '✓ Ayna görünümü açıldı', 'success');
         }}
-        className="px-3 py-2 bg-purple-200 hover:bg-purple-300 text-purple-700 rounded-lg flex items-center gap-2"
+        className="px-3 py-2 bg-pink-200 hover:bg-pink-300 text-pink-700 rounded-lg flex items-center gap-2"
       >
-        <Upload size={16} style={{ transform: 'rotate(90deg)' }} />
-        Ayna Görünümü
+        <Download size={16} style={{ transform: 'rotate(90deg)' }} />
+        {mirrorMode ? 'Ayna Kapalı' : 'Ayna Açık'}
+      </button>
+
+      <button
+        onClick={() => setCameraZoom(Math.min(2, cameraZoom + 0.25))}
+        disabled={cameraZoom >= 2}
+        className="px-3 py-2 bg-cyan-200 hover:bg-cyan-300 text-cyan-700 rounded-lg flex items-center gap-2 disabled:opacity-50"
+      >
+        <ZoomIn size={16} />
+        Yakınlaştır
+      </button>
+
+      <button
+        onClick={() => setCameraZoom(Math.max(1, cameraZoom - 0.25))}
+        disabled={cameraZoom <= 1}
+        className="px-3 py-2 bg-orange-200 hover:bg-orange-300 text-orange-700 rounded-lg flex items-center gap-2 disabled:opacity-50"
+      >
+        <ZoomOut size={16} />
+        Uzaklaştır
       </button>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6">
             <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-              <FileText size={36} />
-              OMR Form Okuyucu Sistemi
+              <Camera size={36} />
+              OMR Form Okuyucu - Canlı Kamera Modu
             </h1>
             <p className="text-blue-100 mt-2 flex items-center gap-2">
-              <Eye size={16} />
-              Akıllı OMR Form Okuma ve Değerlendirme Sistemi
+              <Scan size={16} />
+              Formu kameranın önüne yerleştirin, otomatik okunacaktır
             </p>
           </div>
 
           <div className="p-6 space-y-4 bg-gray-50 border-b">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="space-y-4">
-                <FileUploadButton
-                  label="Öğrenci Formu Seç..."
-                  file={studentForm}
-                  onFileSelect={(file) => handleFileSelect(file, 'student')}
-                  inputRef={studentFormRef}
-                  icon={<Upload size={20} />}
-                  color="green"
-                />
-                
                 <FileUploadButton
                   label="JSON Şablonu Seç..."
                   file={jsonTemplate}
@@ -941,32 +1021,22 @@ const OMRFormReader = () => {
                   color="yellow"
                 />
                 
-                <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-lg border border-purple-200">
-                  <h3 className="font-bold text-purple-800 mb-3 flex items-center gap-2">
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
+                  <h3 className="font-bold text-green-800 mb-3 flex items-center gap-2">
                     <Camera size={18} />
-                    Kamera ile Form Okuma
+                    Canlı Kamera Okuma
                   </h3>
                   
                   <div className="space-y-3">
                     <div className="flex gap-2">
                       <button
                         onClick={() => {
-                          const confirmStart = window.confirm(
-                            '📷 Kamera ile Form Okuma\n\n' +
-                            'Kamera kullanarak formları hızlıca okuyabilirsiniz.\n\n' +
-                            'Devam etmek için:\n' +
-                            '1. "İzin ver" veya "Allow" butonuna tıklayın\n' +
-                            '2. Formu kameranın önüne yerleştirin\n' +
-                            '3. Form otomatik olarak tespit edilecek\n\n' +
-                            'Kamerayı açmak istiyor musunuz?'
-                          );
-                          
-                          if (confirmStart) {
+                          if (!isCameraActive) {
                             startCamera();
                           }
                         }}
                         disabled={isCameraActive}
-                        className="flex-1 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2"
+                        className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2"
                       >
                         <Camera size={16} />
                         {isCameraActive ? 'Kamera Aktif' : 'Kamerayı Aç'}
@@ -983,71 +1053,53 @@ const OMRFormReader = () => {
                     </div>
                     
                     <button
-                      onClick={captureImage}
-                      disabled={!isCameraActive}
+                      onClick={manualCaptureAndProcess}
+                      disabled={!isCameraActive || !jsonTemplate}
                       className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2"
                     >
                       <Scan size={16} />
-                      Görüntüyü Yakala
+                      MANUEL YAKALA ve İŞLE
                     </button>
                     
-                    <button
-                      onClick={captureAndProcess}
-                      disabled={!isCameraActive || !jsonTemplate}
-                      className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle size={16} />
-                      Otomatik Yakala ve İşle
-                    </button>
-                    
-                    <div className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id="showGrid"
-                        checked={showAlignmentGrid}
-                        onChange={(e) => setShowAlignmentGrid(e.target.checked)}
-                        className="h-4 w-4 text-purple-600 rounded focus:ring-purple-500"
-                      />
-                      <label htmlFor="showGrid" className="ml-2 text-sm text-gray-700">
-                        Hizalama Kılavuzlarını Göster
-                      </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id="autoCapture"
+                          checked={isAutoCaptureMode}
+                          onChange={(e) => setIsAutoCaptureMode(e.target.checked)}
+                          className="h-4 w-4 text-green-600 rounded focus:ring-green-500"
+                        />
+                        <label htmlFor="autoCapture" className="ml-2 text-sm text-gray-700">
+                          Otomatik Yakalama
+                        </label>
+                      </div>
+                      
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id="showGuide"
+                          checked={showFormPlacementGuide}
+                          onChange={(e) => setShowFormPlacementGuide(e.target.checked)}
+                          className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <label htmlFor="showGuide" className="ml-2 text-sm text-gray-700">
+                          Yerleştirme Kılavuzu
+                        </label>
+                      </div>
                     </div>
                   </div>
                   
-                  <div className="mt-3 pt-3 border-t border-purple-100">
-                    <div className="text-xs text-gray-600">
-                      <details>
-                        <summary className="cursor-pointer text-purple-600 hover:text-purple-800 font-medium">
-                          🔧 Kamera izni vermede sorun yaşıyorsanız tıklayın
-                        </summary>
-                        <div className="mt-2 p-2 bg-white rounded border border-gray-200 text-left">
-                          <p className="font-medium mb-1">Tarayıcınıza göre izin verme:</p>
-                          <ul className="list-disc pl-5 space-y-1">
-                            <li><strong>Chrome/Edge:</strong> Adres çubuğundaki 🔒 simgesi → Site ayarları → Kamera → "İzin ver"</li>
-                            <li><strong>Firefox:</strong> Adres çubuğundaki 🔒 simgesi → Çark simgesi → Kamera iznini yönet → "İzin ver"</li>
-                            <li><strong>Safari:</strong> Safari → Tercihler → Web siteleri → Kamera → Bu site için "İzin ver"</li>
-                          </ul>
-                          <p className="mt-2 text-xs">İzin verdikten sonra sayfayı yenileyin ve tekrar deneyin.</p>
-                        </div>
-                      </details>
-                    </div>
-                    <div className="mt-2 text-xs text-gray-600 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-gray-400"></div>
-                        <span>Bekliyor</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                        <span>Form Aranıyor</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                        <span>Kısmen Tanındı</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                        <span>Form Tanındı ✓</span>
-                      </div>
+                  <div className="mt-3 pt-3 border-t border-green-100">
+                    <div className="text-sm text-gray-600">
+                      <p className="font-medium mb-1">📋 <strong>Kullanım Talimatları:</strong></p>
+                      <ol className="list-decimal pl-5 space-y-1">
+                        <li>JSON şablonunu yükleyin</li>
+                        <li>Formu kameranın önüne yerleştirin</li>
+                        <li>Formun 4 köşesi otomatik tespit edilecek</li>
+                        <li>Form tanındığında otomatik okunacak</li>
+                        <li>Sonuçlar aşağıda görüntülenecek</li>
+                      </ol>
                     </div>
                   </div>
                 </div>
@@ -1056,102 +1108,78 @@ const OMRFormReader = () => {
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
                 <h3 className="font-bold text-blue-800 mb-2 flex items-center gap-2">
                   <AlertCircle size={16} />
-                  İşlem Seçenekleri
+                  Sistem Durumu
                 </h3>
                 <div className="space-y-3">
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="sameFormOption"
-                      checked={useSameFormForAnswerKey}
-                      onChange={(e) => setUseSameFormForAnswerKey(e.target.checked)}
-                      className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="sameFormOption" className="ml-2 text-sm text-gray-700">
-                      Aynı formu cevap anahtarı olarak kullan
-                    </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className={`p-3 rounded-lg ${isCameraActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                      <div className="text-sm font-medium">Kamera</div>
+                      <div className="text-lg font-bold">{isCameraActive ? 'Aktif ✓' : 'Pasif'}</div>
+                    </div>
+                    <div className={`p-3 rounded-lg ${jsonTemplate ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                      <div className="text-sm font-medium">JSON Şablon</div>
+                      <div className="text-lg font-bold">{jsonTemplate ? 'Yüklü ✓' : 'Bekliyor'}</div>
+                    </div>
+                    <div className={`p-3 rounded-lg ${alignmentStatus === 'aligned' ? 'bg-green-100 text-green-700' : alignmentStatus === 'scanning' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
+                      <div className="text-sm font-medium">Form Durumu</div>
+                      <div className="text-lg font-bold">
+                        {alignmentStatus === 'waiting' ? 'Bekliyor' :
+                         alignmentStatus === 'scanning' ? 'Aranıyor' :
+                         alignmentStatus === 'partial' ? 'Kısmen' :
+                         'Tanındı ✓'}
+                      </div>
+                    </div>
+                    <div className={`p-3 rounded-lg ${processedData ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                      <div className="text-sm font-medium">İşlenmiş Form</div>
+                      <div className="text-lg font-bold">{processedData ? 'Var ✓' : 'Yok'}</div>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    {useSameFormForAnswerKey 
-                      ? "Öğrenci formundaki işaretlemeler cevap anahtarı olarak kullanılacak. Tüm cevaplar doğru kabul edilecek."
-                      : "Cevap anahtarı için ayrı form kullanılacak."}
-                  </p>
-                </div>
-                
-                <div className="mt-4 pt-3 border-t border-blue-100">
-                  <div className="text-sm">
-                    <div className="flex items-center gap-2 mb-1">
-                      <User size={12} className="text-green-600" />
-                      <span className="font-medium">Öğrenci Formu:</span>
-                      <span className="text-gray-600">{studentForm ? studentForm.name : 'Seçilmedi'}</span>
+                  
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-3 h-3 rounded-full ${
+                        alignmentStatus === 'waiting' ? 'bg-gray-400' :
+                        alignmentStatus === 'scanning' ? 'bg-yellow-500' :
+                        alignmentStatus === 'partial' ? 'bg-blue-500' :
+                        'bg-green-500'
+                      }`}></div>
+                      <span className="font-medium">Form Tespit Durumu:</span>
+                      <span className={`font-medium ${
+                        alignmentStatus === 'waiting' ? 'text-gray-600' :
+                        alignmentStatus === 'scanning' ? 'text-yellow-600' :
+                        alignmentStatus === 'partial' ? 'text-blue-600' :
+                        'text-green-600'
+                      }`}>
+                        {alignmentStatus === 'waiting' ? 'Form bekleniyor' :
+                         alignmentStatus === 'scanning' ? 'Form aranıyor' :
+                         alignmentStatus === 'partial' ? `${detectedCorners.length}/4 köşe bulundu` :
+                         'Form tanındı ✓'}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <BookOpen size={12} className="text-blue-600" />
-                      <span className="font-medium">JSON Şablon:</span>
-                      <span className="text-gray-600">{jsonTemplate ? jsonTemplate.name : 'Seçilmedi'}</span>
-                    </div>
-                    {answerKeyForm && !useSameFormForAnswerKey && (
-                      <div className="flex items-center gap-2">
-                        <CheckCircle size={12} className="text-yellow-600" />
-                        <span className="font-medium">Cevap Anahtarı:</span>
-                        <span className="text-gray-600">{answerKeyForm.name}</span>
+                    
+                    {jsonTemplate && (
+                      <div className="mt-2 p-2 bg-white rounded border border-blue-200">
+                        <div className="text-sm">
+                          <div className="font-medium text-blue-700">Yüklenen Şablon:</div>
+                          <div className="truncate">{jsonTemplate.name}</div>
+                          {jsonTemplate.parsed?.template_info && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {jsonTemplate.parsed.template_info.title} • 
+                              {jsonTemplate.parsed.template_info.question_count} soru • 
+                              {jsonTemplate.parsed.template_info.option_count} şık
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
-                
-                {isCameraActive && (
-                  <div className="mt-4 pt-3 border-t border-blue-100">
-                    <div className="text-sm">
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className={`w-3 h-3 rounded-full ${
-                          alignmentStatus === 'waiting' ? 'bg-gray-400' :
-                          alignmentStatus === 'scanning' ? 'bg-yellow-500' :
-                          alignmentStatus === 'partial' ? 'bg-blue-500' :
-                          'bg-green-500'
-                        }`}></div>
-                        <span className="font-medium">Form Durumu:</span>
-                        <span className={`font-medium ${
-                          alignmentStatus === 'waiting' ? 'text-gray-600' :
-                          alignmentStatus === 'scanning' ? 'text-yellow-600' :
-                          alignmentStatus === 'partial' ? 'text-blue-600' :
-                          'text-green-600'
-                        }`}>
-                          {alignmentStatus === 'waiting' ? 'Bekliyor' :
-                           alignmentStatus === 'scanning' ? 'Form Aranıyor' :
-                           alignmentStatus === 'partial' ? 'Kısmen Tanındı' :
-                           'Form Tanındı ✓'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Scan size={12} className="text-purple-600" />
-                        <span className="font-medium">Tespit Edilen Köşe:</span>
-                        <span className="text-gray-600">{detectedCorners.length}/4</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>
 
           <div className="border-b">
-            <div className="flex">
-              <TabButton
-                active={activeTab === 'student'}
-                onClick={() => setActiveTab('student')}
-                label="Öğrenci Formu"
-              />
-              <TabButton
-                active={activeTab === 'json'}
-                onClick={() => setActiveTab('json')}
-                label="JSON Şablonu"
-              />
-              <TabButton
-                active={activeTab === 'answerKey'}
-                onClick={() => setActiveTab('answerKey')}
-                label="C. Anahtarı Formu"
-              />
+            <div className="flex overflow-x-auto">
               <TabButton
                 active={activeTab === 'camera'}
                 onClick={() => setActiveTab('camera')}
@@ -1165,82 +1193,40 @@ const OMRFormReader = () => {
                   </div>
                 }
               />
+              <TabButton
+                active={activeTab === 'student'}
+                onClick={() => setActiveTab('student')}
+                label="Yakalanan Form"
+              />
+              <TabButton
+                active={activeTab === 'json'}
+                onClick={() => setActiveTab('json')}
+                label="JSON Şablonu"
+              />
+              <TabButton
+                active={activeTab === 'answerKey'}
+                onClick={() => setActiveTab('answerKey')}
+                label="C. Anahtarı Formu"
+              />
             </div>
           </div>
 
-          <div className="p-6 bg-white" style={{ minHeight: '400px', maxHeight: '500px', overflow: 'auto' }}>
-            {activeTab === 'student' && (
-              <div className="flex items-center justify-center h-64">
-                {studentForm ? (
-                  <div className="text-center">
-                    <img src={studentForm.data} alt="Öğrenci Formu" className="max-h-48 object-contain mx-auto" />
-                    <p className="text-sm text-gray-500 mt-2">{studentForm.name}</p>
-                  </div>
-                ) : (
-                  <p className="text-gray-400 italic">Öğrenci formu önizlemesi</p>
-                )}
-              </div>
-            )}
-            
-            {activeTab === 'json' && (
-              <div className="h-64 overflow-auto">
-                {jsonTemplate ? (
-                  <div>
-                    <pre className="text-sm bg-gray-50 p-4 rounded font-mono">
-                      {typeof jsonTemplate.data === 'string' 
-                        ? jsonTemplate.data 
-                        : JSON.stringify(jsonTemplate.parsed, null, 2)}
-                    </pre>
-                    {jsonTemplate.parsed?.answer_key && (
-                      <div className="mt-2 text-sm">
-                        <span className="font-medium text-green-700">Cevap Anahtarı:</span>
-                        <span className="ml-2">
-                          {Object.keys(jsonTemplate.parsed.answer_key).length} soru tanımlı
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-gray-400 italic text-center pt-24">JSON şablonu önizlemesi</p>
-                )}
-              </div>
-            )}
-            
-            {activeTab === 'answerKey' && (
-              <div className="flex items-center justify-center h-64">
-                {answerKeyForm ? (
-                  <div className="text-center">
-                    <img src={answerKeyForm.data} alt="Cevap Anahtarı" className="max-h-48 object-contain mx-auto" />
-                    <p className="text-sm text-gray-500 mt-2">{answerKeyForm.name}</p>
-                  </div>
-                ) : useSameFormForAnswerKey && studentForm ? (
-                  <div className="text-center">
-                    <div className="bg-yellow-100 p-4 rounded-lg mb-4">
-                      <AlertCircle className="inline mr-2 text-yellow-600" size={20} />
-                      <span className="text-yellow-700 font-medium">Aynı Form Kullanılıyor</span>
-                      <p className="text-sm text-yellow-600 mt-1">
-                        Öğrenci formu cevap anahtarı olarak kullanılacak
-                      </p>
-                    </div>
-                    <img src={studentForm.data} alt="Öğrenci Formu" className="max-h-32 object-contain mx-auto opacity-75" />
-                  </div>
-                ) : (
-                  <p className="text-gray-400 italic">C. Anahtarı formu önizlemesi</p>
-                )}
-              </div>
-            )}
-            
+          <div className="p-6 bg-white" style={{ minHeight: '500px', maxHeight: '600px', overflow: 'auto' }}>
             {activeTab === 'camera' && (
-              <div className="flex flex-col items-center justify-center h-96">
+              <div className="flex flex-col items-center justify-center">
                 {isCameraActive ? (
-                  <div className="relative w-full max-w-2xl">
-                    <div className={`relative rounded-xl overflow-hidden border-4 ${cameraFrameColor} transition-all duration-300`}>
+                  <div className="relative w-full max-w-4xl">
+                    <div className={`relative rounded-xl overflow-hidden border-4 ${cameraFrameColor} transition-all duration-300 shadow-2xl`}>
                       <video
                         ref={videoRef}
                         autoPlay
                         playsInline
                         className="w-full h-auto"
                         onLoadedMetadata={startScanning}
+                        style={{
+                          transform: mirrorMode ? 'scaleX(-1)' : '',
+                          zoom: cameraZoom
+                        }}
                       />
                       
                       {showAlignmentGrid && (
@@ -1258,10 +1244,10 @@ const OMRFormReader = () => {
                           {detectedCorners.map((corner, index) => (
                             <div 
                               key={index}
-                              className="absolute w-6 h-6 border-2 border-white bg-blue-600 rounded-full transform -translate-x-1/2 -translate-y-1/2 animate-pulse"
+                              className="absolute w-8 h-8 border-2 border-white bg-blue-600 rounded-full transform -translate-x-1/2 -translate-y-1/2 animate-pulse shadow-lg"
                               style={{ left: `${corner.x}px`, top: `${corner.y}px` }}
                             >
-                              <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
+                              <div className="w-full h-full flex items-center justify-center text-white text-sm font-bold">
                                 {index + 1}
                               </div>
                             </div>
@@ -1269,71 +1255,233 @@ const OMRFormReader = () => {
                         </div>
                       )}
                       
-                      {isScanning && (
-                        <div className="absolute top-4 left-4 bg-black bg-opacity-70 text-white px-3 py-1 rounded-lg text-sm font-medium animate-pulse">
-                          <Scan className="inline mr-2" size={14} />
-                          Form Taranıyor...
+                      {showFormPlacementGuide && (
+                        <div className="absolute inset-0 pointer-events-none">
+                          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                            <div className="w-64 h-64 border-4 border-dashed border-white opacity-70 rounded-xl"></div>
+                            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-white text-center">
+                              <div className="bg-black bg-opacity-70 px-4 py-2 rounded-lg">
+                                <Target size={24} className="mx-auto mb-2" />
+                                <p className="font-bold">FORMU BURAYA YERLEŞTİRİN</p>
+                                <p className="text-sm">Köşeler görünür olsun</p>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                       
-                      <div className={`absolute top-4 right-4 px-3 py-1 rounded-lg text-sm font-medium ${
-                        alignmentStatus === 'waiting' ? 'bg-gray-600 text-white' :
+                      {isScanning && (
+                        <div className="absolute top-4 left-4 bg-black bg-opacity-80 text-white px-4 py-2 rounded-lg text-sm font-medium animate-pulse shadow-lg">
+                          <Scan className="inline mr-2" size={16} />
+                          FORM TARANIYOR...
+                        </div>
+                      )}
+                      
+                      <div className={`absolute top-4 right-4 px-4 py-2 rounded-lg text-sm font-medium shadow-lg ${
+                        alignmentStatus === 'waiting' ? 'bg-gray-700 text-white' :
                         alignmentStatus === 'scanning' ? 'bg-yellow-500 text-white' :
                         alignmentStatus === 'partial' ? 'bg-blue-500 text-white' :
                         'bg-green-500 text-white'
                       }`}>
-                        {alignmentStatus === 'waiting' ? '⏳ Bekliyor' :
-                         alignmentStatus === 'scanning' ? '🔍 Form Aranıyor' :
-                         alignmentStatus === 'partial' ? `📐 ${detectedCorners.length}/4 Köşe` :
-                         '✅ Form Tanındı!'}
+                        {alignmentStatus === 'waiting' ? '⏳ FORMU BEKLİYOR' :
+                         alignmentStatus === 'scanning' ? '🔍 FORM ARANIYOR' :
+                         alignmentStatus === 'partial' ? `📐 ${detectedCorners.length}/4 KÖŞE BULUNDU` :
+                         '✅ FORM TANINDI!'}
                       </div>
+                      
+                      {isAutoCaptureMode && alignmentStatus === 'aligned' && (
+                        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg font-bold animate-pulse shadow-lg">
+                          ⚡ OTOMATİK YAKALANACAK
+                        </div>
+                      )}
                     </div>
                     
                     <CameraControls />
                     
-                    <div className="mt-4 text-center text-sm text-gray-600">
-                      <p className="mb-2">
-                        📱 <strong>Formu kameranın önüne yerleştirin</strong>
-                      </p>
-                      <p className="text-xs">
-                        • Formun 4 köşesindeki mavi çemberlerin görünmesini sağlayın
-                        <br />
-                        • Form ekrana tam oturunca otomatik olarak yakalanacak
-                        <br />
-                        • Yeşil renk formun tanındığını gösterir
-                      </p>
+                    <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg border border-blue-200">
+                      <h3 className="font-bold text-blue-800 mb-2 flex items-center gap-2">
+                        <Target size={18} />
+                        Form Yerleştirme Talimatları
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-sm text-gray-700 mb-2">
+                            📱 <strong>Formu kameranın önüne şu şekilde yerleştirin:</strong>
+                          </p>
+                          <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1">
+                            <li>Formun 4 köşesindeki mavi çemberler görünsün</li>
+                            <li>Form ekrana tam otursun, eğik olmasın</li>
+                            <li>Işık yeterli olsun, gölge oluşmasın</li>
+                            <li>Form kameraya paralel olsun</li>
+                            <li>Ekrandaki kare içine formu hizalayın</li>
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-700 mb-2">
+                            ⚙️ <strong>Sistem özellikleri:</strong>
+                          </p>
+                          <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1">
+                            <li><strong>Otomatik Yakalama:</strong> {isAutoCaptureMode ? 'Açık' : 'Kapalı'}</li>
+                            <li><strong>Form Tespiti:</strong> {alignmentStatus === 'aligned' ? 'Başarılı' : 'Bekliyor'}</li>
+                            <li><strong>Tespit Edilen Köşe:</strong> {detectedCorners.length}/4</li>
+                            <li><strong>JSON Şablon:</strong> {jsonTemplate ? 'Yüklü' : 'Bekliyor'}</li>
+                            <li><strong>Kamera:</strong> {isCameraActive ? 'Aktif' : 'Pasif'}</li>
+                          </ul>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center text-gray-400">
-                    <Camera size={64} className="mx-auto mb-4 opacity-50" />
-                    <p className="text-xl font-medium mb-2">Kamera Kapalı</p>
-                    <p className="text-gray-500 max-w-md">
+                  <div className="text-center text-gray-400 py-12">
+                    <Camera size={80} className="mx-auto mb-6 opacity-50" />
+                    <p className="text-2xl font-medium mb-2">Kamera Kapalı</p>
+                    <p className="text-gray-500 max-w-md mx-auto mb-6">
                       Formları hızlıca okumak için kamerayı açın. Formun 4 köşesindeki mavi çemberler otomatik olarak tespit edilecek ve form tanındığında otomatik olarak işlenecek.
                     </p>
+                    <button
+                      onClick={startCamera}
+                      className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-2 mx-auto"
+                    >
+                      <Camera size={20} />
+                      Kamerayı Aç
+                    </button>
                   </div>
                 )}
                 
                 <canvas ref={cameraCanvasRef} className="hidden" />
               </div>
             )}
+            
+            {activeTab === 'student' && (
+              <div className="flex flex-col items-center justify-center h-full">
+                {capturedImage || studentForm ? (
+                  <div className="text-center w-full">
+                    <div className="bg-green-50 p-4 rounded-lg mb-4 border border-green-200">
+                      <div className="flex items-center justify-center gap-2 text-green-700 font-medium">
+                        <Camera size={20} />
+                        Yakalanan Form Görüntüsü
+                      </div>
+                    </div>
+                    <img 
+                      src={capturedImage || studentForm?.data} 
+                      alt="Yakalanan Form" 
+                      className="max-h-72 object-contain mx-auto border-2 border-gray-200 rounded-lg shadow-md" 
+                    />
+                    <p className="text-sm text-gray-500 mt-3">
+                      {studentForm?.name || 'Kameradan yakalanan form'}
+                    </p>
+                    <div className="mt-4 flex gap-3 justify-center">
+                      <button
+                        onClick={() => setActiveTab('camera')}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-all flex items-center gap-2"
+                      >
+                        <Camera size={16} />
+                        Kameraya Dön
+                      </button>
+                      <button
+                        onClick={simulateOMRProcessingReader}
+                        disabled={!jsonTemplate || isProcessing}
+                        className="px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white rounded-lg transition-all flex items-center gap-2"
+                      >
+                        <Scan size={16} />
+                        {isProcessing ? 'İşleniyor...' : 'Formu İşle'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-16">
+                    <p className="text-gray-400 italic text-lg">Henüz form yakalanmadı</p>
+                    <p className="text-gray-500 mt-2">Lütfen kamerayı kullanarak form yakalayın</p>
+                    <button
+                      onClick={() => setActiveTab('camera')}
+                      className="mt-4 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-all flex items-center gap-2 mx-auto"
+                    >
+                      <Camera size={16} />
+                      Kameraya Git
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {activeTab === 'json' && (
+              <div className="h-full overflow-auto">
+                {jsonTemplate ? (
+                  <div>
+                    <div className="bg-blue-50 p-4 rounded-lg mb-4 border border-blue-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-blue-700 font-medium">
+                          <BookOpen size={20} />
+                          JSON Şablon Bilgileri
+                        </div>
+                        <button
+                          onClick={() => setActiveTab('camera')}
+                          className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg transition-all"
+                        >
+                          Kameraya Dön
+                        </button>
+                      </div>
+                      {jsonTemplate.parsed?.template_info && (
+                        <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                          <div><span className="font-medium">Başlık:</span> {jsonTemplate.parsed.template_info.title}</div>
+                          <div><span className="font-medium">Soru Sayısı:</span> {jsonTemplate.parsed.template_info.question_count}</div>
+                          <div><span className="font-medium">Şık Sayısı:</span> {jsonTemplate.parsed.template_info.option_count}</div>
+                          <div><span className="font-medium">Cevap Anahtarı:</span> {Object.keys(jsonTemplate.parsed.answer_key || {}).length} soru</div>
+                        </div>
+                      )}
+                    </div>
+                    <pre className="text-sm bg-gray-50 p-4 rounded font-mono max-h-96 overflow-auto">
+                      {typeof jsonTemplate.data === 'string' 
+                        ? jsonTemplate.data 
+                        : JSON.stringify(jsonTemplate.parsed, null, 2)}
+                    </pre>
+                  </div>
+                ) : (
+                  <p className="text-gray-400 italic text-center pt-24">JSON şablonu yüklenmedi</p>
+                )}
+              </div>
+            )}
+            
+            {activeTab === 'answerKey' && (
+              <div className="flex items-center justify-center h-full">
+                {answerKeyForm ? (
+                  <div className="text-center">
+                    <img src={answerKeyForm.data} alt="Cevap Anahtarı" className="max-h-64 object-contain mx-auto" />
+                    <p className="text-sm text-gray-500 mt-2">{answerKeyForm.name}</p>
+                  </div>
+                ) : useSameFormForAnswerKey && studentForm ? (
+                  <div className="text-center">
+                    <div className="bg-yellow-100 p-4 rounded-lg mb-4">
+                      <AlertCircle className="inline mr-2 text-yellow-600" size={20} />
+                      <span className="text-yellow-700 font-medium">Aynı Form Kullanılıyor</span>
+                      <p className="text-sm text-yellow-600 mt-1">
+                        Öğrenci formu cevap anahtarı olarak kullanılacak
+                      </p>
+                    </div>
+                    <img src={studentForm.data} alt="Öğrenci Formu" className="max-h-48 object-contain mx-auto opacity-75" />
+                  </div>
+                ) : (
+                  <p className="text-gray-400 italic">Cevap anahtarı formu yüklenmedi</p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="p-6 bg-gray-50 border-t flex gap-4">
             <button
-              onClick={simulateOMRProcessingReader}
-              disabled={!studentForm || !jsonTemplate || isProcessing}
-              className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              onClick={manualCaptureAndProcess}
+              disabled={!isCameraActive || !jsonTemplate || isProcessing}
+              className="flex-1 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
             >
               {isProcessing ? (
                 <>
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  İşleniyor...
+                  İŞLENİYOR...
                 </>
               ) : (
                 <>
                   <Scan size={20} />
-                  OMR Formunu İşle
+                  MANUEL YAKALA ve İŞLE
                 </>
               )}
             </button>
@@ -1341,10 +1489,10 @@ const OMRFormReader = () => {
             <button
               onClick={openEditMode}
               disabled={!processedData}
-              className="flex-1 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex-1 bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-bold py-3 px-6 rounded-lg transition-all transform hover:scale-105 disabled:scale-100 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
             >
               <Pencil size={20} />
-              Okunan Verileri Düzenle
+              OKUNAN VERİLERİ DÜZENLE
             </button>
           </div>
 
@@ -1353,7 +1501,7 @@ const OMRFormReader = () => {
               <div className="flex items-center justify-center gap-3">
                 <Loader2 className="animate-spin text-blue-600" size={24} />
                 <div className="flex-1">
-                  <div className="text-blue-700 font-medium mb-1">OCR İşleniyor...</div>
+                  <div className="text-blue-700 font-medium mb-1">OCR İŞLENİYOR...</div>
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div 
                       className="bg-green-500 h-2 rounded-full transition-all duration-300"
@@ -1380,14 +1528,14 @@ const OMRFormReader = () => {
         </div>
 
         <div className="mt-6 text-center text-gray-600 text-sm">
-          <p>OMR Form Okuyucu Sistemi - Gelişmiş form okuma ve değerlendirme aracı</p>
+          <p><strong>OMR Form Okuyucu - Canlı Kamera Modu</strong> | Formu kameranın önüne yerleştirin, otomatik okunsun!</p>
           <p className="mt-1">
             <span className="font-medium">Özellikler:</span> 
-            <span className="ml-2">• OCR ile otomatik metin okuma</span>
-            <span className="ml-2">• Kamera ile form yakalama</span>
-            <span className="ml-2">• Otomatik hizalama ve köşe tespiti</span>
-            <span className="ml-2">• Manuel veri düzenleme</span>
-            <span className="ml-2">• JSON şablon desteği</span>
+            <span className="ml-2">• Otomatik kamera açma</span>
+            <span className="ml-2">• Form köşe tespiti</span>
+            <span className="ml-2">• Otomatik/manuel yakalama</span>
+            <span className="ml-2">• Canlı görüntü işleme</span>
+            <span className="ml-2">• Gerçek zamanlı sonuçlar</span>
           </p>
         </div>
       </div>
@@ -1472,9 +1620,8 @@ const OMRFormReader = () => {
                         </button>
                       </div>
                       {processedData?.ocr?.className && editedData.className !== processedData.ocr.className && (
-                        <div className="mt-1 text-xs text-yellow-600 flex items-center gap-1">
-                          <AlertCircle size={12} />
-                          <span>OCR'dan farklı bir değer girildi</span>
+                        <div className="mt-1 text-xs text-yellow-600">
+                          ⚠️ Değer değiştirildi. Orijinal OCR değeri: {processedData.ocr.className}
                         </div>
                       )}
                     </div>
@@ -1493,7 +1640,7 @@ const OMRFormReader = () => {
                         value={editedData.name}
                         onChange={(e) => setEditedData(prev => ({...prev, name: e.target.value}))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        placeholder={processedData?.ocr?.name || "Öğrenci adı"}
+                        placeholder={processedData?.ocr?.name || "Ad"}
                       />
                     </div>
                     
@@ -1511,173 +1658,113 @@ const OMRFormReader = () => {
                         value={editedData.surname}
                         onChange={(e) => setEditedData(prev => ({...prev, surname: e.target.value}))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        placeholder={processedData?.ocr?.surname || "Öğrenci soyadı"}
+                        placeholder={processedData?.ocr?.surname || "Soyad"}
                       />
                     </div>
                   </div>
-                  
-                  {processedData?.ocr && (
-                    <div className="mt-4 pt-4 border-t border-blue-200">
-                      <details className="text-sm">
-                        <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium">
-                          📄 OCR Ham Verileri (Tıklayarak Göster/Gizle)
-                        </summary>
-                        <div className="mt-2 bg-white p-3 rounded border border-gray-200">
-                          <pre className="text-xs font-mono text-gray-700 overflow-auto">
-                            {JSON.stringify(processedData.ocr, null, 2)}
-                          </pre>
-                        </div>
-                      </details>
-                    </div>
-                  )}
                 </div>
 
                 <div className="bg-green-50 p-6 rounded-xl border border-green-200">
                   <h3 className="text-lg font-bold text-green-800 mb-4 flex items-center gap-2">
-                    <CheckCircle size={20} />
-                    Soru Cevapları
+                    <CheckSquare size={20} />
+                    Öğrenci Cevapları
+                    {processedData?.stats && (
+                      <span className="ml-auto text-sm bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                        Puan: {processedData.stats.score}
+                      </span>
+                    )}
                   </h3>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {Object.keys(editedData.answers).sort((a,b) => parseInt(a) - parseInt(b)).map(questionNum => (
-                      <div key={questionNum} className="bg-white p-4 rounded-lg border border-gray-200">
-                        <div className="font-bold text-gray-800 mb-2">
-                          Soru {questionNum}
-                          {processedData?.correctAnswers?.[questionNum] && (
-                            <span className="ml-2 text-xs text-green-600">
-                              (Doğru: {processedData.correctAnswers[questionNum]})
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {['A', 'B', 'C', 'D', 'E'].slice(0, 5).map(option => (
-                            <button
-                              key={option}
-                              onClick={() => updateAnswerInEditMode(questionNum, option)}
-                              className={`flex-1 min-w-[30px] py-1 rounded text-sm transition-all ${
-                                editedData.answers[questionNum] === option
-                                  ? 'bg-green-500 text-white font-bold'
-                                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                              }`}
-                            >
-                              {option}
-                            </button>
-                          ))}
-                          <button
-                            onClick={() => updateAnswerInEditMode(questionNum, '-')}
-                            className={`flex-1 min-w-[40px] py-1 rounded text-sm transition-all ${
-                              editedData.answers[questionNum] === '-'
-                                ? 'bg-orange-500 text-white font-bold'
-                                : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                            }`}
-                          >
-                            Boş
-                          </button>
-                          <button
-                            onClick={() => updateAnswerInEditMode(questionNum, 'X')}
-                            className={`flex-1 min-w-[50px] py-1 rounded text-sm transition-all ${
-                              editedData.answers[questionNum] === 'X'
-                                ? 'bg-red-500 text-white font-bold'
-                                : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                            }`}
-                          >
-                            Geçersiz
-                          </button>
-                        </div>
-                        <div className="mt-2 text-xs text-center text-gray-500">
-                          {editedData.answers[questionNum] === '-' ? 'Boş' : 
-                           editedData.answers[questionNum] === 'X' ? 'Geçersiz' : 
-                           `Cevap: ${editedData.answers[questionNum]}`}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Soru No</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Öğrenci Cevabı</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doğru Cevap</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Durum</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {Object.keys(editedData.answers).sort((a, b) => parseInt(a) - parseInt(b)).map(questionNum => (
+                          <tr key={questionNum}>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {questionNum}
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap">
+                              <select
+                                value={editedData.answers[questionNum] || '-'}
+                                onChange={(e) => updateAnswerInEditMode(questionNum, e.target.value)}
+                                className="border border-gray-300 rounded px-2 py-1 text-sm"
+                              >
+                                <option value="-">-</option>
+                                <option value="A">A</option>
+                                <option value="B">B</option>
+                                <option value="C">C</option>
+                                <option value="D">D</option>
+                                <option value="E">E</option>
+                              </select>
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                              {processedData?.correctAnswers?.[questionNum] || '-'}
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap">
+                              <span className={`px-2 py-1 text-xs rounded-full ${
+                                editedData.answers[questionNum] === '-'
+                                  ? 'bg-gray-100 text-gray-700'
+                                  : editedData.answers[questionNum] === processedData?.correctAnswers?.[questionNum]
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-red-100 text-red-700'
+                              }`}>
+                                {editedData.answers[questionNum] === '-' ? 'Boş' :
+                                 editedData.answers[questionNum] === processedData?.correctAnswers?.[questionNum] ? 'Doğru' : 'Yanlış'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
-
-                <div className="bg-yellow-50 p-6 rounded-xl border border-yellow-200">
-                  <h3 className="text-lg font-bold text-yellow-800 mb-4 flex items-center gap-2">
-                    <Eye size={20} />
-                    Önizleme
-                  </h3>
                   
-                  <div className="bg-white p-4 rounded-lg border border-yellow-200">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="font-medium text-gray-700">Öğrenci No:</span>
-                        <span className="ml-2">{editedData.studentId || '(boş)'}</span>
+                  {processedData?.stats && (
+                    <div className="mt-4 pt-4 border-t border-green-100">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-green-600">{processedData.stats.correct}</div>
+                          <div className="text-xs text-gray-600">Doğru</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-red-600">{processedData.stats.incorrect}</div>
+                          <div className="text-xs text-gray-600">Yanlış</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-gray-600">{processedData.stats.blank}</div>
+                          <div className="text-xs text-gray-600">Boş</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-600">{processedData.stats.score}</div>
+                          <div className="text-xs text-gray-600">Puan</div>
+                        </div>
                       </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Sınıf:</span>
-                        <span className="ml-2">{editedData.className || '(boş)'}</span>
-                        {processedData?.ocr?.className && editedData.className !== processedData.ocr.className && (
-                          <span className="ml-2 text-xs text-yellow-600">(OCR'dan farklı)</span>
-                        )}
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Ad:</span>
-                        <span className="ml-2">{editedData.name || '(boş)'}</span>
-                        {processedData?.ocr?.name && editedData.name !== processedData.ocr.name && (
-                          <span className="ml-2 text-xs text-yellow-600">(OCR'dan farklı)</span>
-                        )}
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Soyad:</span>
-                        <span className="ml-2">{editedData.surname || '(boş)'}</span>
-                        {processedData?.ocr?.surname && editedData.surname !== processedData.ocr.surname && (
-                          <span className="ml-2 text-xs text-yellow-600">(OCR'dan farklı)</span>
-                        )}
-                      </div>
-                      <div className="col-span-2">
-                        <span className="font-medium text-gray-700">Toplam Cevaplanan Soru:</span>
-                        <span className="ml-2">
-                          {Object.values(editedData.answers).filter(a => a !== '-' && a !== 'X').length} / {Object.keys(editedData.answers).length}
-                        </span>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="font-medium text-gray-700">Boş Sorular:</span>
-                        <span className="ml-2">
-                          {Object.values(editedData.answers).filter(a => a === '-').length}
-                        </span>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="font-medium text-gray-700">Geçersiz Sorular:</span>
-                        <span className="ml-2">
-                          {Object.values(editedData.answers).filter(a => a === 'X').length}
-                        </span>
-                      </div>
-                      {processedData?.stats && (
-                        <>
-                          <div className="col-span-2">
-                            <span className="font-medium text-gray-700">Önceki Puan:</span>
-                            <span className="ml-2">{processedData.stats.score || 0}</span>
-                          </div>
-                          <div className="col-span-2">
-                            <span className="font-medium text-gray-700">Önceki Doğru:</span>
-                            <span className="ml-2">{processedData.stats.correct || 0}</span>
-                          </div>
-                        </>
-                      )}
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
             
-            <div className="p-6 bg-gray-50 border-t flex justify-between">
+            <div className="p-6 bg-gray-50 border-t flex justify-end gap-3">
               <button
                 onClick={() => setEditMode(false)}
-                className="px-6 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition-all font-medium flex items-center gap-2"
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium rounded-lg transition-all"
               >
-                <XCircle size={16} />
                 İptal
               </button>
-              
               <button
                 onClick={saveEditedData}
-                className="px-6 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-all font-bold flex items-center gap-2"
+                className="px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold rounded-lg transition-all flex items-center gap-2"
               >
-                <CheckCircle size={16} />
-                Kaydet ve Kapat
+                <Save size={16} />
+                Kaydet
               </button>
             </div>
           </div>
