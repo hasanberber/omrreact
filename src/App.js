@@ -1,5 +1,5 @@
 // OMRFormReader.js
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Tesseract from 'tesseract.js';
 import { 
   Upload, FileText, CheckCircle, XCircle, 
@@ -56,31 +56,7 @@ const OMRFormReader = () => {
   const scanIntervalRef = useRef(null);
 
   // Sayfa yüklendiğinde otomatik kamera aç
-  useEffect(() => {
-    const initCamera = async () => {
-      try {
-        await startCamera();
-      } catch (error) {
-        console.log('Kamera otomatik açılamadı:', error.message);
-        addResult('📷 Kamera otomatik açılamadı. Lütfen formları dosya olarak yükleyin.', 'warning');
-      }
-    };
-
-    initCamera();
-
-    // Cleanup
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-      }
-    };
-  }, []);
-
-  // KAMERA FONKSİYONLARI
-  const startCamera = async () => {
+  const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
@@ -162,8 +138,32 @@ const OMRFormReader = () => {
       addResult(`❌ ${errorMessage} ${errorDetails ? `(${errorDetails})` : ''}`, 'error');
       throw error;
     }
-  };
+  }, [addResult]);
 
+  useEffect(() => {
+    const initCamera = async () => {
+      try {
+        await startCamera();
+      } catch (error) {
+        console.log('Kamera otomatik açılamadı:', error.message);
+        addResult('📷 Kamera otomatik açılamadı. Lütfen formları dosya olarak yükleyin.', 'warning');
+      }
+    };
+
+    initCamera();
+
+    // Cleanup
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+      }
+    };
+  }, [cameraStream, startCamera]);
+
+  // KAMERA FONKSİYONLARI
   const stopCamera = () => {
     if (cameraStream) {
       cameraStream.getTracks().forEach(track => track.stop());
@@ -486,6 +486,10 @@ const OMRFormReader = () => {
   };
 
   // FORM OKUYUCU FONKSİYONLARI
+  const addResult = useCallback((message, type = 'info') => {
+    setResults(prev => [...prev, { message, type, timestamp: Date.now() }]);
+  }, []);
+
   const handleFileSelect = (file, type) => {
     if (!file) return;
 
@@ -542,10 +546,6 @@ const OMRFormReader = () => {
     } else {
       reader.readAsDataURL(file);
     }
-  };
-
-  const addResult = (message, type = 'info') => {
-    setResults(prev => [...prev, { message, type, timestamp: Date.now() }]);
   };
 
   const processImageWithCanvas = (imageData, callback) => {
